@@ -1,6 +1,109 @@
 import torch
 import torch.nn as nn
+import timm 
 
+class conv_block_1x1(nn.Module):
+    def __init(self, in_feat, out_feat, activ=nn.ReLU ,bias=False):
+        super(conv_block_1x1,self).__init()
+
+        self.conv = nn.Conv2d(in_feat, out_feat, 1, bias=bias)
+        self.batchorm = nn.BatchNorm2d(out_feat)
+        self.act = activ()
+
+    def forward(self,x):
+        x = self.conv(x)
+        x = self.batchnorm(x)
+
+        return self.act(x)
+
+class conv_block_3x3(nn.Module):
+    def __init(self, in_feat, out_feat, activ=nn.ReLU ,bias=False):
+        super(conv_block_3x3,self).__init()
+
+        self.conv = nn.Conv2d(in_feat, out_feat, 3,1,1, bias=bias)
+        self.batchorm = nn.BatchNorm2d(out_feat)
+        self.act = activ()
+
+    def forward(self,x):
+        x = self.conv(x)
+        x = self.batchnorm(x)
+
+        return self.act(x)
+
+class CA(nn.Module):
+    '''
+    Channel Attention Layer: https://arxiv.org/pdf/1709.01507
+    '''
+    def __init__(self, in_feat,redu):
+        super(CA,self).__init__()
+
+        out_feat = in_feat//redu
+        self.avgpool = nn.AdaptiveAvgPool2d(1)
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_feat,out_feat, bias=False),
+            nn.ReLU(),
+            nn.Conv2d(out_feat,in_feat, bias=False),
+            nn.Sigmoid()
+        )
+    
+    def forward(self, x):
+        y = self.avgpool(x)
+        y = self.conv(y)
+
+        return y*x
+
+class PPM(nn.Module):
+    '''
+    Pyramid Pooling Module
+    '''
+    def __init__(self, in_feat, redu_feat, bins):
+        super(PPM,self).__init__()
+
+        self.ppm = []
+
+        for bin in bins:
+            self.ppm += nn.Sequential(
+                nn.AdaptiveAvgPool2d(bin),
+                conv_block_1x1(in_feat, out_feat))
+        
+        self.ppm = nn.ModuleList(self.ppm)
+    
+    def forward(self, x):
+        x_size = x.size()[2:] # hxw
+        out = [x]
+
+        # Execute ever pooling layer in the pyramid and upsample the output to the input size
+        for pp in self.ppm:
+            pool = pp(x)
+            out += F.interpolate(pool, size=x_size, mode='bilinear', align_corners=True)
+
+        return torch.cat(out, dim=1)
+
+class PSPNet(nn.Module):
+    '''
+    Implementation of PSPNet https://arxiv.org/pdf/1612.01105
+    '''
+    def __init__(self, bins=(1,2,3,6), classes=19):
+        super(PSPNet,self).__init__()
+        # training recipe :ResNet strikes back: An improved training procedure in timm: https://arxiv.org/abs/2110.00476
+        # hyperparameter tuning inspired by MobileNetV4 -- Universal Models for the Mobile Ecosystem: https://arxiv.org/abs/2404.10518
+        self.backbone = timm.create_model('resnet50d.ra4_e3600_r224_in1k', pretrained=True, num_classes=0) # features_only=True
+        in_feat = 2048
+        out_feat = int(in_feat/len(bins))
+        self.ppm = PPM(in_feat,out_feat, bins)
+
+        self.decoder = nn.Sequential(
+            conv_block_3x3(in_feat,512),
+            nn.Conv2d(512,classes, 1))
+
+    def forward(self, x):
+        x_size = x.size()[2:] # hxw
+        x = self.backbone.forward_features(x)
+        x = self.ppm(x)
+        x = self.decoder(x)
+        x = F.interpolate(x, size=x_size, mode='bilinear', align_corners=True)
+
+        return x
 
 class UNet(nn.Module):
     """ 
