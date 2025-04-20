@@ -1,5 +1,10 @@
 # Runnig the main experiment for training the best performing model.
 sbatch jobscript_slurm.sh
+
+# Before using Depth Anything.
+Besides of setting up the correct model-name in the jobscript you need also to download checkpoints from
+https://huggingface.co/depth-anything/Depth-Anything-V2-Base/tree/main
+and create a  with name depth/ inside Final Assignment directory where the depth_anything_v2_vitb.pth should be located
 # Training the other models proposed in the paper.
 Change model-name in jobscript_slurm.sh and use the specific training settings reported in the paper.
 # Some Evaluation Code test.py
@@ -11,3 +16,4 @@ Run evaluation for one pretrained model with sbatch test.sh
 
 # Low in computing budget
 Use sbatch poor_job.sh only when you are out of snellius credits.
+
