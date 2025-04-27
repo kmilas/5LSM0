@@ -5,7 +5,7 @@ from einops import rearrange
 from typing import List, Optional, Tuple
 
 class DinoV2WithInjectedClassTokens(nn.Module):
-    def __init__(self, num_classes, image_size=(560, 560)):
+    def __init__(self, num_classes,image_size=(560, 560)):
         super().__init__()
         self.num_classes = num_classes
         self.image_size = image_size
@@ -28,7 +28,7 @@ class DinoV2WithInjectedClassTokens(nn.Module):
         x = x + self.vit.interpolate_pos_encoding(x, W, H)
         #x = self.vit.norm_pre(x)
 
-        # Early blocks (no class tokens yet)
+        # (no class tokens yet)
         for blk in self.early_blocks:
             x = blk(x)
 
@@ -36,7 +36,7 @@ class DinoV2WithInjectedClassTokens(nn.Module):
         cls_tokens = self.cls_emb.expand(B, -1, -1)  # (B, num_classes, C)
         x = torch.cat([x, cls_tokens], dim=1)
 
-        # Late blocks
+        # Patch + class tokens
         for blk in self.late_blocks:
             x = blk(x)
 
@@ -82,7 +82,7 @@ class SegmenterEoMT(nn.Module):
         self.encoder = DinoV2WithInjectedClassTokens(num_classes, image_size)
         self.decoder = SegmenterStyleDecoder(patch_size, d_model, num_classes)
 
-    def forward(self, x):
+    def forward(self, x, im_size=(560,560)):
         x = self.encoder(x)
         masks = self.decoder(x, self.encoder.image_size)
         masks = F.interpolate(masks, size=self.encoder.image_size, mode='bilinear', align_corners=False)

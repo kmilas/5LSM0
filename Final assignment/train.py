@@ -84,7 +84,9 @@ def get_args_parser():
     parser.add_argument("--eval-freq", type=int, default=10, help="After how many epoch log mIoU")
     parser.add_argument("--num-workers", type=int, default=10, help="Number of workers for data loaders")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
-    parser,add_argument("--clip-grad", type=bool, default=False, help="Clip gradients")
+    # True: clip-grad = 0 False: clip-grad = 1 
+    parser.add_argument("--clip-grad", type=int, default=0, help="Clip gradients")
+    parser.add_argument("--scheduler", type=int, default=0, help="If scheduler==0 PolyLR, if scheduler==1 StepLR ")
     parser.add_argument("--experiment-id", type=str, default="pspnet-training", help="Experiment ID for Weights & Biases")
 
     return parser
@@ -133,13 +135,6 @@ def main(args):
             ToDtype(torch.float32, scale=True),
             Normalize(mean=imgnet_1k_mean, std=imgnet_1k_std),])
 
-    # Define the transforms to apply to the data
-    #transform = Compose([
-    #    ToImage(),
-    #    Resize((256, 256)),
-    #    ToDtype(torch.float32, scale=True),
-    #    Normalize((0.5,), (0.5,)),
-    #])
 
     # Load the dataset and make a split for training and validation
     train_dataset = Cityscapes(
@@ -178,51 +173,44 @@ def main(args):
     max_iters = len(train_dataloader)*args.epochs
     
     iter = 0
-    # Define the model
-    #model = UNet(
-    #    in_channels=3,  # RGB images
-    #    n_classes=19,  # 19 classes in the Cityscapes dataset
-    #).to(device)
-    #model = PSPNet(classes=19).to(device)
-        # dinov2-linear
-    #model = Segmenter(n_cls=19, patch_size=14, d_encoder=768).to(device)
-        # depth-anythingv2
-    #model = Segmenter(
-    #    n_cls=19, 
-    #    patch_size=14, 
-    #    d_encoder=768, 
-    #    backbone='dinov2_vitb14', 
-    #    depth_anything=True
-    #).to(device)   
+ 
+    print('Resume:',args.resume)
+    print('Crop size:',args.crop_size)
+
     if(args.model_name == 'dinov2s_uper'):
 
         model = Dinov2Uper(n_cls=19, patch_size=14, d_encoder=384, freeze=args.freeze)
-        if args.resume:
-            dinov2s_uper_50_dropout = 'checkpoints/dinov2-uper-dropout-aux-4e-1-adamW-steplr-3e-5-crop-672-batch-8/final_model-epoch=0049-val_loss=0.16938070645408024.pth'
-            ckpt = torch.load(
-                    dinov2s_uper_50_dropout,
-                    map_location='cpu', 
-                    weights_only=True
-            )
-            model.load_state_dict(ckpt)
 
-    elif(args.model_name == 'dinov2b_linear'):
+    elif(args.model_name == 'dinov2s_linear'):
 
         model = Segmenter(
             n_cls=19, 
             patch_size=14, 
-            d_encoder=768, 
-            backbone='dinov2_vitb14', 
-        depth_anything=False
+            d_encoder=384, 
+            backbone='dinov2_vits14', 
+            depth_anything=False
         )
-        if args.resume:
-            dinov2e5_100 = 'checkpoints/dinov2b-linear-adamW-step-lr-1e-5-crop-560-batch-8/final_model-epoch=0099-val_loss=0.1707789365734373.pth'
-            ckpt = torch.load(
-                    dinov2e5_100,
-                    map_location='cpu', 
-                    weights_only=True
-            )
-            model.load_state_dict(ckpt)
+
+
+    elif(args.model_name == 'dinov2b_linear'):
+        # 'dinov2_vitb14_reg'
+        # base 786
+        # small 384
+        model = Segmenter(
+            n_cls=19, 
+            patch_size=14, 
+            d_encoder=768, 
+            backbone='dinov2_vitb14_reg', 
+            depth_anything=False
+        )
+        #if args.resume:
+        #    dinov2e5_100 = 'checkpoints/dinov2b-linear-adamW-step-lr-1e-5-crop-560-batch-8/final_model-epoch=0099-val_loss=0.1707789365734373.pth'
+        #    ckpt = torch.load(
+        #            dinov2e5_100,
+        #            map_location='cpu', 
+        #            weights_only=True
+        #    )
+        #    model.load_state_dict(ckpt)
     elif(args.model_name == 'depth_anything_linear'):
         model = Segmenter(
             n_cls=19, 
@@ -231,14 +219,7 @@ def main(args):
             backbone='dinov2_vitb14', 
             depth_anything=True
         )
-        if args.resume:
-            depth_any_e5_27 = 'checkpoints/depth-anything-linear-adamW-steplr-1e-5-crop-560-batch-8/best_model-epoch=0027-val_loss=0.16759864051663687.pth'
-            ckpt = torch.load(
-                    depth_any_e5_27,
-                    map_location='cpu', 
-                    weights_only=True
-            )
-            model.load_state_dict(ckpt)
+
     elif (args.model_name == 'eomt'):
         model = SegmenterEoMT(
             num_classes=19, 
@@ -258,8 +239,12 @@ def main(args):
 
 
     optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    lr_scheduler = PolyLRScheduler(optimizer, t_initial=max_iters, warmup_t=1500, warmup_lr_init=args.lr*1e-6, warmup_prefix=True)
-
+    if args.scheduler == 1:
+        lr_scheduler = PolyLRScheduler(optimizer, t_initial=max_iters, warmup_t=1500, warmup_lr_init=args.lr*1e-6, warmup_prefix=True)
+    elif args.scheduler == 0:
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.1)
+    else: 
+        raise KeyError(f'invalid {args.scheduler} for scheduler') 
     #optimizer = AdamW(model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.05)
     
     #optimizer = SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=1e-4)
@@ -296,11 +281,12 @@ def main(args):
                     outputs, aux_logits = model(images)
                     loss = criterion(outputs, labels) + 0.4*aux_criterion(aux_logits, labels)
                 else:
-                    outputs = model(images)
+                    # im_size only for dinov2 linear
+                    outputs = model(images, im_size=(args.crop_size,args.crop_size))
                     loss = criterion(outputs, labels) 
 
             scaler.scale(loss).backward()
-            if args.clip_grad:
+            if args.clip_grad==0:
                 scaler.unscale_(optimizer)  # Important for proper grad clipping
                 nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.01)
 
@@ -313,9 +299,11 @@ def main(args):
                 "learning_rate": optimizer.param_groups[0]['lr'],
                 "epoch": epoch + 1,
             }, step=epoch * len(train_dataloader) + i)
-            lr_scheduler.step(iter)
+            if args.scheduler == 1:
+                lr_scheduler.step(iter)
             iter += 1
-        #scheduler.step()    
+        if args.scheduler == 0:
+            scheduler.step()    
         # Validation
         model.eval()
         with torch.no_grad():
@@ -327,7 +315,8 @@ def main(args):
 
                 labels = labels.long().squeeze(1)  # Remove channel dimension
 
-                outputs = model(images)
+                # im_size only for dinov2 linear
+                outputs = model(images, im_size=(args.crop_size,args.crop_size))
                 loss = criterion(outputs, labels)
                 losses.append(loss.item())
 

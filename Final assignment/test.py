@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import timm
 from vit_model import Segmenter
 from uper_head import Dinov2Uper
+from eomt_segm import SegmenterEoMT
 import torch
 from torchmetrics.classification import MulticlassJaccardIndex
 from torchmetrics.segmentation import DiceScore
@@ -17,6 +18,8 @@ from torchvision.transforms.v2 import (
     Compose,
     Normalize,
     Resize,
+    RandomCrop,
+    CenterCrop,
     ToImage,
     ToDtype,
 )
@@ -174,6 +177,7 @@ dinov2s_uper_32 = 'checkpoints/dinov2-uper-aux-4e-1-adamW-steplr-3e-5-crop-672-b
 dinov2s_uper_50 = 'checkpoints/dinov2-uper-aux-4e-1-adamW-steplr-3e-5-crop-672-batch-8/final_model-epoch=0049-val_loss=0.17037812608575065.pth'
 dinov2s_uper_32_dropout = 'checkpoints/dinov2-uper-dropout-aux-4e-1-adamW-steplr-3e-5-crop-672-batch-8/best_model-epoch=0032-val_loss=0.16742488611785192.pth'
 dinov2s_uper_50_dropout = 'checkpoints/dinov2-uper-dropout-aux-4e-1-adamW-steplr-3e-5-crop-672-batch-8/final_model-epoch=0049-val_loss=0.16938070645408024.pth'
+
 ckpt = torch.load(
     dinov2e5_50,
     map_location='cpu', 
@@ -195,6 +199,14 @@ elif model_name == 'depth_any':
         depth_anything=True
     )
     image_size = 560
+elif model_name == 'eomt':
+    image_size = 448
+    model = SegmenterEoMT(
+            num_classes=19, 
+            patch_size=14, 
+            d_model=768, 
+            image_size=(image_size, image_size)
+    )
 else:
     # depth is only true when you use depth_any_e5_27 model
     depth = True
@@ -223,7 +235,13 @@ dice = DiceScore(
     input_format='index',     # You're using integer label maps
     zero_division=0.0         
 ).to(device)
-
+mdice_metric = DiceScore(
+    num_classes=19,          
+    include_background=False, # Exclude background (class 0) if needed
+    average='macro',          
+    input_format='index',     # You're using integer label maps
+    zero_division=0.0         
+).to(device)
 
 model.eval()
 with torch.no_grad():
@@ -251,10 +269,13 @@ with torch.no_grad():
         assert preds_valid.min() >= 0 and preds_valid.max() < 19, f"preds out of range: {preds_valid.min()} to {preds_valid.max()}"
         assert labels_valid.min() >= 0 and labels_valid.max() < 19, f"labels out of range: {labels_valid.min()} to {labels_valid.max()}"
         miou_metric.update(preds_valid, labels_valid)
+        mdice_metric.update(preds_valid, labels_valid)
         dice.update(preds_valid, labels_valid)
 
 miou = miou_metric.compute()
+mdice = mdice_metric.compute()
 print(f"Mean IoU: {miou:.4f}")
+print(f"Mean Dice: {mdice:.4f}")
 
 class_dice_scores = dice.compute()
 mean_dice_score = torch.mean(class_dice_scores)
@@ -262,4 +283,4 @@ mean_dice_score = torch.mean(class_dice_scores)
 
 for i, score in enumerate(class_dice_scores):
     print(f"Class {i}: Dice Score = {score:.4f}")
-print(f"\nMean Dice Score: {mean_dice_score:.4f}")
+#print(f"\nMean Dice Score: {mean_dice_score:.4f}")

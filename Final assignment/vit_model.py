@@ -57,5 +57,5 @@ class Segmenter(nn.Module):
     def forward(self,x, im_size=(560,560)):
         x = self.vit.forward_features(x)['x_norm_patchtokens']
         x = self.decoder(x, im_size)
-        x = F.interpolate(x, size=image_size, mode="bilinear")
+        x = F.interpolate(x, size=im_size, mode="bilinear")
         return x

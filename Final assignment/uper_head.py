@@ -252,7 +252,7 @@ class Dinov2Uper(nn.Module):
         self.dropout = nn.Dropout2d(dropout)
         self.cls_seg = nn.Conv2d(d_encoder, n_cls, kernel_size=1)
 
-  def forward(self,x):
+  def forward(self,x, im_size=(672,672)):
         if self.freeze:
             with torch.no_grad():
                 x = self.vit.get_intermediate_layers(x,
