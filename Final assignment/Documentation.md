@@ -1,3 +1,6 @@
+# ID
+Codalab username: kmilas
+
 # Runnig the main experiment for training the best performing model.
 sbatch jobscript_slurm.sh
 
